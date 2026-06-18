@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SimPay\SDK;
 
+use SimPay\SDK\Exception\AliasNotUniqueException;
 use SimPay\SDK\Exception\ApiException;
 use SimPay\SDK\Http\CurlHttpClient;
 use SimPay\SDK\Http\HttpClientInterface;
@@ -88,8 +89,16 @@ final class SimPayClient
 
     /**
      * Send BLIK Level 0 code.
+     *
+     * Optionally pass a BlikAlias to register a OneClick alias during the first payment.
+     * After successful registration, listen for the `blik:alias_status_changed` IPN event.
+     *
+     * @param string        $transactionId
+     * @param string        $blikCode       6-digit BLIK code
+     * @param BlikAlias|null $alias         Alias to register (use BlikAlias::register())
+     * @return array<string, mixed>
      */
-    public function sendBlikLevel0(string $transactionId, string $blikCode): array
+    public function sendBlikLevel0(string $transactionId, string $blikCode, ?BlikAlias $alias = null): array
     {
         $url = sprintf(
             '%s/payment/%s/blik/level0/%s',
@@ -98,9 +107,77 @@ final class SimPayClient
             rawurlencode($transactionId)
         );
 
-        return $this->post($url, [
+        $payload = [
             'ticket' => ['T6' => $blikCode],
-        ]);
+        ];
+
+        if ($alias !== null) {
+            $payload['alias'] = $alias->toArray();
+        }
+
+        return $this->post($url, $payload);
+    }
+
+    /**
+     * Send a BLIK OneClick payment (without a 6-digit code).
+     *
+     * Requires an active alias — either identified by SimPay UUID
+     * (BlikAlias::fromUuid) or by your own value+type (BlikAlias::fromValue).
+     *
+     * On success the API returns HTTP 204 (empty body) — the customer receives
+     * a push notification in their banking app to authorize the payment.
+     *
+     * If the alias matches multiple banking apps (only with value+type method),
+     * an AliasNotUniqueException is thrown containing the alternatives list.
+     * Present the list to the user, then retry with BlikAlias::withBlikId().
+     *
+     * @param string   $transactionId
+     * @param BlikAlias $alias
+     * @return array<string, mixed> Empty array on success (HTTP 204)
+     *
+     * @throws AliasNotUniqueException When alias matches multiple banking apps
+     * @throws ApiException            On other API errors
+     */
+    public function sendBlikOneClick(string $transactionId, BlikAlias $alias): array
+    {
+        $url = sprintf(
+            '%s/payment/%s/blik/level0/%s',
+            $this->config->getBaseUrl(),
+            $this->config->getServiceId(),
+            rawurlencode($transactionId)
+        );
+
+        $payload = [
+            'alias' => $alias->toArray(),
+        ];
+
+        $response = $this->httpClient->request('POST', $url, $this->buildHeaders(), $payload);
+
+        // HTTP 204 No Content — success, push notification sent to the customer
+        if ($response->getStatusCode() === 204) {
+            return [];
+        }
+
+        $data = $response->toArray();
+
+        if ($response->isSuccessful()) {
+            return $data;
+        }
+
+        // Handle ALIAS_NOT_UNIQUE error
+        $errorCode = $data['errorCode'] ?? $data['code'] ?? null;
+        if ($response->getStatusCode() === 400 && $errorCode === 'ALIAS_NOT_UNIQUE') {
+            throw new AliasNotUniqueException(
+                $data['message'] ?? 'Alias is not unique',
+                $data['data']['alternatives'] ?? []
+            );
+        }
+
+        throw new ApiException(
+            $response->getStatusCode(),
+            $data['message'] ?? null,
+            $data['code'] ?? null
+        );
     }
 
     // ──────────────────────────────────────────────────────────────────────

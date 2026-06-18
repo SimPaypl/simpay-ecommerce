@@ -30,6 +30,13 @@ final class PaymentStatus
     // IPN event types
     public const TYPE_TRANSACTION_STATUS = 'transaction:status_changed';
     public const TYPE_REFUND_STATUS = 'transaction_refund:status_changed';
+    public const TYPE_BLIK_ALIAS_STATUS = 'blik:alias_status_changed';
+    public const TYPE_BLIK_CODE_STATUS = 'transaction_blik_level0:code_status_changed';
+
+    // BLIK alias statuses
+    public const ALIAS_ACTIVE = 'alias_active';
+    public const ALIAS_INACTIVE = 'alias_inactive';
+    public const ALIAS_PENDING = 'alias_pending';
 
     /**
      * Does the status indicate a successful payment?

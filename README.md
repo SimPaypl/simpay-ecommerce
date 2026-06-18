@@ -28,14 +28,15 @@ W `composer.json` pluginu:
 ```
 src/
 ├── SimPay.php              # Główna fasada — punkt wejścia
-├── SimPayClient.php        # Klient HTTP do API (transakcje, refundy, BLIK, kanały, IP)
+├── SimPayClient.php        # Klient HTTP do API (transakcje, refundy, BLIK, OneClick, kanały, IP)
 ├── Configuration.php       # Credentials + metadata platformy
+├── BlikAlias.php           # DTO aliasu BLIK OneClick
 ├── IpnValidator.php        # Walidacja webhooków (wersja UA, pola, podpis, service_id)
-├── IpnPayload.php          # DTO wyniku walidacji IPN
+├── IpnPayload.php          # DTO wyniku walidacji IPN (+ helpery BLIK alias)
 ├── IpAllowlistService.php  # Walidacja IP z opcjonalnym cache
 ├── TransactionBuilder.php  # Fluent builder payloadu transakcji
 ├── AmountVerifier.php      # Porównywanie kwot (float-safe)
-├── PaymentStatus.php       # Stałe statusów (transaction_paid, transaction_expired, etc.)
+├── PaymentStatus.php       # Stałe statusów (transaction_paid, alias_active, etc.)
 ├── CacheInterface.php      # Interfejs cache — implementuj per-platforma
 ├── Http/
 │   ├── HttpClientInterface.php
@@ -44,6 +45,7 @@ src/
 └── Exception/
     ├── SimPayException.php
     ├── ApiException.php
+    ├── AliasNotUniqueException.php  # Błąd wieloznaczności aliasu BLIK
     ├── HttpException.php
     ├── IpnException.php
     └── IpNotAllowedException.php
@@ -140,7 +142,87 @@ $simpay->client()->createRefund($transactionId, 50.00);    // częściowy
 ### BLIK Level 0
 
 ```php
+// Prosta płatność BLIK Level 0 (bez rejestracji aliasu)
 $simpay->client()->sendBlikLevel0($transactionId, '123456');
+```
+
+### BLIK Level 0 + OneClick (Płatności bez kodu)
+
+#### Krok 1: Pierwsza płatność z rejestracją aliasu
+
+Podczas pierwszej płatności klient wpisuje 6-cyfrowy kod BLIK, a Ty rejestrujesz alias,
+aby umożliwić przyszłe płatności bez kodu:
+
+```php
+use SimPay\SDK\BlikAlias;
+
+$alias = BlikAlias::register(
+    label: 'Nazwa Twojego Sklepu',         // Zgodna z certyfikacją BLIK
+    value: 'unikalne_id_klienta_123'        // Twoje wewnętrzne ID klienta
+);
+
+$simpay->client()->sendBlikLevel0($transactionId, '123456', $alias);
+```
+
+#### Krok 2: Obsługa IPN aliasu (`blik:alias_status_changed`)
+
+Po płatności aplikacja bankowa zapyta klienta o zapis sklepu jako zaufanego.
+Nasłuchuj zdarzenia IPN `blik:alias_status_changed`:
+
+```php
+$ipn = $simpay->handleIpn($payload, $userAgent, $remoteIp);
+
+if ($ipn->isBlikAliasEvent() && $ipn->isAliasActive()) {
+    $aliasUuid = $ipn->getAliasId(); // UUID aliasu SimPay
+    // Zapisz $aliasUuid w bazie danych przy koncie klienta
+    $db->saveAliasUuid($userId, $aliasUuid);
+}
+```
+
+#### Krok 3: Płatność OneClick (bez kodu BLIK)
+
+**Metoda A — przez UUID SimPay** (rekomendowana, zawsze jednoznaczna):
+
+```php
+$alias = BlikAlias::fromUuid(
+    uuid: $savedAliasUuid,               // UUID z kroku 2
+    label: 'Nazwa Twojego Sklepu'
+);
+
+$simpay->client()->sendBlikOneClick($transactionId, $alias);
+// HTTP 204 — klient dostaje push w aplikacji bankowej
+```
+
+**Metoda B — przez własne ID klienta** (value + type):
+
+```php
+$alias = BlikAlias::fromValue(
+    value: 'unikalne_id_klienta_123',
+    label: 'Nazwa Twojego Sklepu'
+);
+
+$simpay->client()->sendBlikOneClick($transactionId, $alias);
+```
+
+#### Obsługa błędu ALIAS_NOT_UNIQUE
+
+Gdy klient ma kilka aplikacji bankowych podpiętych pod to samo ID (tylko Metoda B):
+
+```php
+use SimPay\SDK\Exception\AliasNotUniqueException;
+
+try {
+    $simpay->client()->sendBlikOneClick($transactionId, $alias);
+} catch (AliasNotUniqueException $e) {
+    // Wyświetl klientowi wybór banku
+    $alternatives = $e->getAlternatives();
+    // Każda alternatywa: ['label' => 'PKO BP', 'blik_id' => 953824, ...]
+
+    // Po wyborze klienta — ponów z blik_id:
+    $selectedBlikId = $alternatives[$userChoice]['blik_id'];
+    $resolvedAlias = $alias->withBlikId($selectedBlikId);
+    $simpay->client()->sendBlikOneClick($transactionId, $resolvedAlias);
+}
 ```
 
 ### Kanały płatności
@@ -227,5 +309,16 @@ PaymentStatus::TRANSACTION_EXPIRED
 PaymentStatus::TRANSACTION_FAILURE
 PaymentStatus::TRANSACTION_FRAUD
 PaymentStatus::TRANSACTION_REFUNDED
+
+// BLIK OneClick:
+PaymentStatus::ALIAS_ACTIVE
+PaymentStatus::ALIAS_INACTIVE
+PaymentStatus::ALIAS_PENDING
+
+// Typy eventów IPN:
+PaymentStatus::TYPE_TRANSACTION_STATUS      // 'transaction:status_changed'
+PaymentStatus::TYPE_REFUND_STATUS           // 'transaction_refund:status_changed'
+PaymentStatus::TYPE_BLIK_ALIAS_STATUS       // 'blik:alias_status_changed'
+PaymentStatus::TYPE_BLIK_CODE_STATUS        // 'transaction_blik_level0:code_status_changed'
 ```
 

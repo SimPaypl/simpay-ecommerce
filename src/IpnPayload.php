@@ -39,6 +39,70 @@ final class IpnPayload
     }
 
     /**
+     * Is this a BLIK alias status change event?
+     *
+     * Fired when a customer accepts/rejects saving a shop as trusted
+     * in their banking app after the first BLIK Level 0 payment with alias registration.
+     */
+    public function isBlikAliasEvent(): bool
+    {
+        return $this->type === 'blik:alias_status_changed';
+    }
+
+    /**
+     * Is this a BLIK Level 0 code/alias authorization status event?
+     *
+     * Contains low-level technical details from the Polish Payment Standard (PSP)
+     * about the BLIK code or alias authorization attempt.
+     */
+    public function isBlikCodeStatusEvent(): bool
+    {
+        return $this->type === 'transaction_blik_level0:code_status_changed';
+    }
+
+    /**
+     * Get the BLIK alias UUID from a blik:alias_status_changed event.
+     *
+     * Store this UUID in your database when alias status becomes "alias_active".
+     * Use it later with BlikAlias::fromUuid() for OneClick payments.
+     *
+     * @return string|null UUID or null if not an alias event / not present
+     */
+    public function getAliasId(): ?string
+    {
+        if (!$this->isBlikAliasEvent()) {
+            return null;
+        }
+
+        return isset($this->data['id']) ? (string) $this->data['id'] : null;
+    }
+
+    /**
+     * Get the BLIK alias status from a blik:alias_status_changed event.
+     *
+     * Possible values: "alias_active", "alias_inactive", "alias_pending".
+     * Only proceed with OneClick when status is "alias_active".
+     *
+     * @return string|null Alias status or null if not an alias event
+     */
+    public function getAliasStatus(): ?string
+    {
+        if (!$this->isBlikAliasEvent()) {
+            return null;
+        }
+
+        return isset($this->data['status']) ? (string) $this->data['status'] : null;
+    }
+
+    /**
+     * Is the BLIK alias active and ready for OneClick payments?
+     */
+    public function isAliasActive(): bool
+    {
+        return $this->getAliasStatus() === PaymentStatus::ALIAS_ACTIVE;
+    }
+
+    /**
      * Status from the data field (e.g. "transaction_paid", "transaction_expired").
      */
     public function getStatus(): string
