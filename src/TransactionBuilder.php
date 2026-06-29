@@ -40,6 +40,10 @@ final class TransactionBuilder
     // Returns
     private ?string $returnSuccess = null;
     private ?string $returnFailure = null;
+    private ?string $returnPending = null;
+
+    // Commission mode
+    private string $commissionMode = 'merchant';
 
     // Billing
     private ?array $billing = null;
@@ -119,10 +123,24 @@ final class TransactionBuilder
     // Return URLs
     // ──────────────────────────────────────────────────────────────────────
 
-    public function setReturnUrls(string $successUrl, string $failureUrl): self
+    public function setReturnUrls(string $successUrl, string $failureUrl, ?string $pendingUrl = null): self
     {
         $this->returnSuccess = $successUrl;
         $this->returnFailure = $failureUrl;
+        $this->returnPending = $pendingUrl;
+        return $this;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Commission mode
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * Set commission mode: 'merchant' (default) or 'payer'.
+     */
+    public function setCommissionMode(string $mode): self
+    {
+        $this->commissionMode = $mode;
         return $this;
     }
 
@@ -261,11 +279,18 @@ final class TransactionBuilder
 
         // Returns
         if ($this->returnSuccess !== null && $this->returnFailure !== null) {
-            $payload['returns'] = [
+            $returns = [
                 'success' => $this->returnSuccess,
                 'failure' => $this->returnFailure,
             ];
+            if ($this->returnPending !== null) {
+                $returns['pending'] = $this->returnPending;
+            }
+            $payload['returns'] = $returns;
         }
+
+        // Commission mode
+        $payload['commissionMode'] = $this->commissionMode;
 
         // Direct channel
         if ($this->directChannel !== null) {
