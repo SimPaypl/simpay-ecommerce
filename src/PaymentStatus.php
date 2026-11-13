@@ -38,25 +38,15 @@ final class PaymentStatus
     public const ALIAS_INACTIVE = 'alias_inactive';
     public const ALIAS_PENDING = 'alias_pending';
 
-    /**
-     * Does the status indicate a successful payment?
-     */
     public static function isPaid(string $status): bool
     {
-        return in_array($status, [
-            self::TRANSACTION_PAID,
-            self::TRANSACTION_CONFIRMED,
-        ], true);
+        return $status === self::TRANSACTION_PAID;
     }
 
-    /**
-     * Is this a terminal (final) status that won't change?
-     */
     public static function isFinal(string $status): bool
     {
         return in_array($status, [
             self::TRANSACTION_PAID,
-            self::TRANSACTION_CONFIRMED,
             self::TRANSACTION_CANCELED,
             self::TRANSACTION_EXPIRED,
             self::TRANSACTION_FAILURE,
@@ -67,9 +57,6 @@ final class PaymentStatus
         ], true);
     }
 
-    /**
-     * Does the status indicate a failure or cancellation?
-     */
     public static function isFailed(string $status): bool
     {
         return in_array($status, [

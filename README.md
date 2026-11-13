@@ -7,6 +7,7 @@ Wspólne SDK do obsługi płatności SimPay we wszystkich naszych pluginach e-co
 - **Porównywanie kwot** — float-safe porównanie czy zapłacono wystarczająco
 - **Klient API** — tworzenie transakcji, refundy, BLIK, kanały płatności
 - **Builder transakcji** — budowanie payloadu z walidacją pól
+- **Połącz z SimPay (OAuth)** — automatyczna konfiguracja pluginu: klucz API, adres IPN i klucz IPN bez ręcznego kopiowania
 
 ## Instalacja
 
@@ -38,6 +39,7 @@ src/
 ├── AmountVerifier.php      # Porównywanie kwot (float-safe)
 ├── PaymentStatus.php       # Stałe statusów (transaction_paid, alias_active, etc.)
 ├── CacheInterface.php      # Interfejs cache — implementuj per-platforma
+├── OAuth/                  # „Połącz z SimPay” (OAuthConnector + DTO)
 ├── Http/
 │   ├── HttpClientInterface.php
 │   ├── HttpResponse.php
@@ -113,9 +115,10 @@ if ($ipn->isTransactionEvent()) {
     }
 
     $orderId = $ipn->getControl();
-    $paidAmount = $ipn->getEffectiveAmount($orderCurrency);
 
-    if (!AmountVerifier::isAmountSufficient($orderTotal, $paidAmount)) {
+    // amount.original_value / original_currency — kwota i waluta, w jakiej sklep utworzył transakcję
+    if ($ipn->getCurrency() !== $orderCurrency
+        || !AmountVerifier::isAmountSufficient($orderTotal, $ipn->getAmount())) {
         http_response_code(400);
         exit('Amount mismatch');
     }
@@ -231,6 +234,22 @@ try {
 $channels = $simpay->client()->getChannels();
 ```
 
+## Połącz z SimPay (OAuth)
+
+Automatyczna konfiguracja pluginu: sprzedawca loguje się w SimPay i wybiera usługę, a SDK tworzy klucz API,
+ustawia adres IPN i generuje klucz IPN. Szczegóły w docblocku `OAuthConnector`.
+
+```php
+$connector = OAuthConnector::create($clientId, $storage); // $storage: OAuthStorageInterface (sesja admina)
+
+redirect($connector->start($callbackUrl));                       // 1. przycisk „Połącz”
+$pending = $connector->handleCallback($_GET);                     // 2. callback → lista usług
+$result  = $connector->connect($serviceId, $ipnUrl, $keyName);    // 3. wybór usługi
+// zapisz $result->apiKey, $result->serviceId, $result->ipnSignatureKey
+```
+
+> ⚠️ `connect()` generuje nowy klucz IPN — poprzedni przestaje działać od razu.
+
 ## Adapter HTTP (opcjonalny)
 
 Domyślnie SDK używa cURL. Jeśli platforma wymaga innego klienta HTTP:
@@ -298,8 +317,8 @@ $simpay = new SimPay($bearer, $serviceId, $signatureKey, 'prestashop', _PS_VERSI
 ```php
 use SimPay\SDK\PaymentStatus;
 
-PaymentStatus::isPaid($status);    // transaction_paid | transaction_confirmed
-PaymentStatus::isFinal($status);   // paid, confirmed, canceled, expired, failure, fraud, refunded
+PaymentStatus::isPaid($status);    // tylko transaction_paid (transaction_confirmed = płatność w toku)
+PaymentStatus::isFinal($status);   // paid, canceled, expired, failure, fraud, refunded
 PaymentStatus::isFailed($status);  // canceled, expired, failure, fraud
 
 // Stałe do użycia w match/switch:

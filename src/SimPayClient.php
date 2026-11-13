@@ -176,7 +176,7 @@ final class SimPayClient
         throw new ApiException(
             $response->getStatusCode(),
             $data['message'] ?? null,
-            $data['code'] ?? null
+            $errorCode
         );
     }
 
@@ -250,10 +250,11 @@ final class SimPayClient
             return $data;
         }
 
+        // API returns the error code as "code" or "errorCode" depending on the endpoint (e.g. BLIK)
         throw new ApiException(
             $response->getStatusCode(),
             $data['message'] ?? null,
-            $data['code'] ?? null
+            $data['code'] ?? $data['errorCode'] ?? null
         );
     }
 }
