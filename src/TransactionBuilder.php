@@ -223,16 +223,34 @@ final class TransactionBuilder
     // Cart items
     // ──────────────────────────────────────────────────────────────────────
 
-    public function addCartItem(string $name, int $quantity, float $unitPrice, ?string $producer = null): self
-    {
+    /**
+     * @param float       $unitPrice Price of a single item (sent as "price")
+     * @param string|null $code      Product code / SKU
+     */
+    public function addCartItem(
+        string $name,
+        int $quantity,
+        float $unitPrice,
+        ?string $producer = null,
+        ?string $category = null,
+        ?string $code = null
+    ): self {
         $item = [
             'name' => mb_substr($name, 0, 255),
             'quantity' => $quantity,
-            'unitPrice' => $unitPrice,
+            'price' => $unitPrice,
         ];
 
         if ($producer !== null) {
             $item['producer'] = mb_substr($producer, 0, 255);
+        }
+
+        if ($category !== null) {
+            $item['category'] = mb_substr($category, 0, 255);
+        }
+
+        if ($code !== null) {
+            $item['code'] = mb_substr($code, 0, 255);
         }
 
         $this->cartItems[] = $item;

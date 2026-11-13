@@ -133,50 +133,76 @@ final class IpnPayload
     }
 
     /**
-     * Transaction amount (amount.value).
+     * Event amount.
+     *
+     * Transaction events: amount in the currency the shop created the transaction in
+     * (amount.original_value, falls back to amount.final_value) - compare it against the order total.
+     * Refund events: refunded amount (amount.value).
      */
     public function getAmount(): float
     {
-        return (float) ($this->data['amount']['value'] ?? 0);
+        $amount = $this->data['amount'] ?? [];
+
+        return (float) ($amount['original_value'] ?? $amount['final_value'] ?? $amount['value'] ?? 0);
     }
 
     /**
-     * Transaction currency (amount.currency).
+     * Event currency: amount.original_currency (transactions, falls back to amount.final_currency)
+     * or amount.currency (refunds).
      */
     public function getCurrency(): string
     {
-        return (string) ($this->data['amount']['currency'] ?? '');
+        $amount = $this->data['amount'] ?? [];
+
+        return (string) ($amount['original_currency'] ?? $amount['final_currency'] ?? $amount['currency'] ?? '');
     }
 
     /**
-     * Original amount (before currency conversion), if available.
+     * Amount sent by the shop (amount.original_value), or null if not present.
      */
     public function getOriginalAmount(): ?float
     {
-        if (!isset($this->data['originalAmount']['value'])) {
+        if (!isset($this->data['amount']['original_value'])) {
             return null;
         }
-        return (float) $this->data['originalAmount']['value'];
+        return (float) $this->data['amount']['original_value'];
     }
 
     /**
-     * Original currency, if available.
+     * Currency sent by the shop (amount.original_currency), or null if not present.
      */
     public function getOriginalCurrency(): ?string
     {
-        return $this->data['originalAmount']['currency'] ?? null;
+        return isset($this->data['amount']['original_currency']) ? (string) $this->data['amount']['original_currency'] : null;
+    }
+
+    /**
+     * Amount after conversion, as settled by SimPay (amount.final_value), or null if not present.
+     */
+    public function getFinalAmount(): ?float
+    {
+        if (!isset($this->data['amount']['final_value'])) {
+            return null;
+        }
+        return (float) $this->data['amount']['final_value'];
+    }
+
+    /**
+     * Currency after conversion (amount.final_currency), or null if not present.
+     */
+    public function getFinalCurrency(): ?string
+    {
+        return isset($this->data['amount']['final_currency']) ? (string) $this->data['amount']['final_currency'] : null;
     }
 
     /**
      * Returns the amount to compare against the order total.
-     * If the order is in a non-PLN currency and originalAmount is available — use it.
+     *
+     * @deprecated Use getAmount() (and compare getCurrency() with the order currency).
+     *             The order currency no longer matters: original_value is always in the shop's currency.
      */
-    public function getEffectiveAmount(string $orderCurrency): float
+    public function getEffectiveAmount(string $orderCurrency = ''): float
     {
-        if ($orderCurrency !== 'PLN' && $this->getOriginalAmount() !== null) {
-            return $this->getOriginalAmount();
-        }
-
         return $this->getAmount();
     }
 
